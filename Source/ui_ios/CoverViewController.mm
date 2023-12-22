@@ -1,7 +1,6 @@
 #import <SDWebImage/UIImageView+WebCache.h>
 #import "CoverViewController.h"
 #import "EmulatorViewController.h"
-#import "SettingsViewController.h"
 #import "../ui_shared/BootablesProcesses.h"
 #import "../ui_shared/BootablesDbClient.h"
 #import "PathUtils.h"
@@ -16,78 +15,22 @@
 
 static NSString* const reuseIdentifier = @"coverCell";
 
-- (void)buildCollectionWithForcedFullScan:(BOOL)forceFullDeviceScan
+- (void)awakeFromNib
 {
-	UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Building collection" message:@"Please wait..." preferredStyle:UIAlertControllerStyleAlert];
+	[super awakeFromNib];
 
-	CGRect aivRect = CGRectMake(0, 0, 40, 40);
-
-	UIActivityIndicatorView* aiv = [[UIActivityIndicatorView alloc] initWithFrame:aivRect];
-	[aiv startAnimating];
-
-	UIViewController* vc = [[UIViewController alloc] init];
-	vc.preferredContentSize = aivRect.size;
-	[vc.view addSubview:aiv];
-	[alert setValue:vc forKey:@"contentViewController"];
-
-	[self presentViewController:alert animated:YES completion:nil];
-
-	dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-	dispatch_async(queue, ^{
-	  auto activeDirs = GetActiveBootableDirectories();
-	  if(forceFullDeviceScan || activeDirs.empty())
-	  {
-		  dispatch_async(dispatch_get_main_queue(), ^{
-			alert.message = @"Scanning games on filesystem...";
-		  });
-		  ScanBootables("/private/var/mobile");
-	  }
-	  else
-	  {
-		  dispatch_async(dispatch_get_main_queue(), ^{
-			alert.message = @"Scanning games in active directories...";
-		  });
-		  for(const auto& activeDir : activeDirs)
-		  {
-			  ScanBootables(activeDir, false);
-		  }
-	  }
-
-	  //Always scan games in app storage. The app's path change when it's reinstalled,
-	  //thus, games from the previous installation won't be found (will be deleted in PurgeInexistingFiles).
-	  dispatch_async(dispatch_get_main_queue(), ^{
-		alert.message = @"Scanning games in app storage...";
-	  });
-	  ScanBootables(Framework::PathUtils::GetPersonalDataPath());
-
-	  dispatch_async(dispatch_get_main_queue(), ^{
-		alert.message = @"Purging inexisting files...";
-	  });
-	  PurgeInexistingFiles();
-
-	  dispatch_async(dispatch_get_main_queue(), ^{
-		alert.message = @"Fetching game titles...";
-	  });
-	  FetchGameTitles();
-
-	  if(_bootables)
-	  {
-		  delete _bootables;
-		  _bootables = nullptr;
-	  }
-	  _bootables = new BootableArray(BootablesDb::CClient::GetInstance().GetBootables());
-
-	  //Done
-	  dispatch_async(dispatch_get_main_queue(), ^{
-		[alert dismissViewControllerAnimated:YES completion:nil];
-		[self.collectionView reloadData];
-	  });
-	});
+	ScanBootables(Framework::PathUtils::GetPersonalDataPath());
+	ScanBootables("/private/var/mobile");
+	PurgeInexistingFiles();
+	FetchGameTitles();
 }
 
 - (void)viewDidLoad
 {
 	[super viewDidLoad];
+
+	assert(_bootables == nullptr);
+	_bootables = new BootableArray(BootablesDb::CClient::GetInstance().GetBootables());
 
 	CAGradientLayer* bgLayer = [BackgroundLayer blueGradient];
 	bgLayer.frame = self.view.bounds;
@@ -98,8 +41,6 @@ static NSString* const reuseIdentifier = @"coverCell";
 	{
 		self.collectionView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
 	}
-
-	[self buildCollectionWithForcedFullScan:NO];
 }
 
 - (void)viewDidUnload
@@ -142,7 +83,7 @@ static NSString* const reuseIdentifier = @"coverCell";
 
 - (NSInteger)collectionView:(UICollectionView*)collectionView numberOfItemsInSection:(NSInteger)section
 {
-	return _bootables ? _bootables->size() : 0;
+	return _bootables->size();
 }
 
 - (UICollectionViewCell*)collectionView:(UICollectionView*)collectionView cellForItemAtIndexPath:(NSIndexPath*)indexPath
@@ -175,19 +116,6 @@ static NSString* const reuseIdentifier = @"coverCell";
 		EmulatorViewController* emulatorViewController = segue.destinationViewController;
 		emulatorViewController.bootablePath = [NSString stringWithUTF8String:bootable.path.native().c_str()];
 		[self.collectionView deselectItemAtIndexPath:indexPath animated:NO];
-	}
-	else if([segue.identifier isEqualToString:@"showSettings"])
-	{
-		UINavigationController* navViewController = segue.destinationViewController;
-		SettingsViewController* settingsViewController = (SettingsViewController*)navViewController.visibleViewController;
-		settingsViewController.allowFullDeviceScan = true;
-		settingsViewController.allowGsHandlerSelection = true;
-		settingsViewController.completionHandler = ^(bool fullScanRequested) {
-		  if(fullScanRequested)
-		  {
-			  [self buildCollectionWithForcedFullScan:YES];
-		  }
-		};
 	}
 }
 
